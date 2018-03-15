@@ -10,7 +10,21 @@ from PIL import Image
 from modelsNIPS import decoder1,decoder2,decoder3,decoder4,decoder5
 from modelsNIPS import encoder1,encoder2,encoder3,encoder4,encoder5
 import torch.nn as nn
+import scipy.misc
+import skimage.color
+import cv2
 
+
+def save_lab_image(tensor, save_fn='Result'):
+    arr = tensor.mul(255).clamp(0, 255).byte().permute(1, 2, 0).numpy()
+    rgb = cv2.cvtColor(arr, cv2.COLOR_LAB2RGB)
+    im = Image.fromarray(rgb)
+    im.save(save_fn)
+
+def save_rgb_image(tensor, save_fn='Result'):
+    ndarr = tensor.mul(255).clamp(0, 255).byte().permute(1, 2, 0).numpy()
+    im = Image.fromarray(ndarr)
+    im.save(save_fn)
 
 
 class WCT(nn.Module):

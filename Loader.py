@@ -10,19 +10,32 @@ import os
 import torch.nn as nn
 from torch.autograd import Variable
 import numpy as np
+import scipy.misc
+import skimage.color
+import cv2
 
 def is_image_file(filename):
     return any(filename.endswith(extension) for extension in [".png", ".jpg", ".jpeg"])
 
-def default_loader(path):
-    return Image.open(path).convert('RGB')
+def default_loader(path, mode='RGB'):
+    img = Image.open(path).convert('RGB')
+    if mode=='RGB':
+        return img
+    elif mode=='LAB':
+        arr = np.array(img)
+        cv_img = cv2.cvtColor(arr, cv2.COLOR_RGB2LAB)
+        lab = Image.fromarray(cv_img)
+        return lab
 
 class Dataset(data.Dataset):
-    def __init__(self,contentPath,stylePath,fineSize):
+    def __init__(self,contentPath,stylePath,fineSize,mode):
         super(Dataset,self).__init__()
         self.contentPath = contentPath
-        self.image_list = [x for x in listdir(contentPath) if is_image_file(x)]
+        self.content_image_list = [x for x in sorted(listdir(contentPath)) if is_image_file(x)]
         self.stylePath = stylePath
+        self.style_image_list = [x for x in sorted(listdir(stylePath)) if is_image_file(x)]
+
+        self.mode = mode
         self.fineSize = fineSize
         #self.normalize = transforms.Normalize(mean=[103.939,116.779,123.68],std=[1, 1, 1])
         #normalize = transforms.Normalize(mean=[123.68,103.939,116.779],std=[1, 1, 1])
@@ -33,10 +46,10 @@ class Dataset(data.Dataset):
                     ])
 
     def __getitem__(self,index):
-        contentImgPath = os.path.join(self.contentPath,self.image_list[index])
-        styleImgPath = os.path.join(self.stylePath,self.image_list[index])
-        contentImg = default_loader(contentImgPath)
-        styleImg = default_loader(styleImgPath)
+        contentImgPath = os.path.join(self.contentPath,self.content_image_list[index])
+        styleImgPath = os.path.join(self.stylePath,self.style_image_list[index])
+        contentImg = default_loader(contentImgPath, self.mode)
+        styleImg = default_loader(styleImgPath, self.mode)
 
         # resize
         if(self.fineSize != 0):
@@ -58,8 +71,8 @@ class Dataset(data.Dataset):
         # Preprocess Images
         contentImg = transforms.ToTensor()(contentImg)
         styleImg = transforms.ToTensor()(styleImg)
-        return contentImg.squeeze(0),styleImg.squeeze(0),self.image_list[index]
+        return contentImg.squeeze(0),styleImg.squeeze(0),self.content_image_list[index]
 
     def __len__(self):
         # You should change 0 to the total size of your dataset.
-        return len(self.image_list)
+        return len(self.content_image_list)

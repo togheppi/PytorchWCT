@@ -7,13 +7,13 @@ import torchvision.utils as vutils
 import torchvision.datasets as datasets
 from Loader import Dataset
 from util import *
-import scipy.misc
 from torch.utils.serialization import load_lua
 import time
 
+
 parser = argparse.ArgumentParser(description='WCT Pytorch')
-parser.add_argument('--contentPath',default='images/content',help='path to train')
-parser.add_argument('--stylePath',default='images/style',help='path to train')
+parser.add_argument('--contentPath',default='images/content/photo/mountain',help='path to train')
+parser.add_argument('--stylePath',default='images/style/BnS',help='path to train')
 parser.add_argument('--workers', default=2, type=int, metavar='N',help='number of data loading workers (default: 4)')
 parser.add_argument('--vgg1', default='models/vgg_normalised_conv1_1.t7', help='Path to the VGG conv1_1')
 parser.add_argument('--vgg2', default='models/vgg_normalised_conv2_1.t7', help='Path to the VGG conv2_1')
@@ -24,13 +24,14 @@ parser.add_argument('--decoder5', default='models/feature_invertor_conv5_1.t7', 
 parser.add_argument('--decoder4', default='models/feature_invertor_conv4_1.t7', help='Path to the decoder4')
 parser.add_argument('--decoder3', default='models/feature_invertor_conv3_1.t7', help='Path to the decoder3')
 parser.add_argument('--decoder2', default='models/feature_invertor_conv2_1.t7', help='Path to the decoder2')
-parser.add_argument('--decoder1', default='models/feature_invertor_conv1_1.t7', help='Path to the decoder1')
-parser.add_argument('--cuda', action='store_true', help='enables cuda')
+parser.add_argument('--decoder1', default='models/feature_invertor_conv1_1.t7', help='Path to the dejsdTcoder1')
+parser.add_argument('--cuda', action='store_true', default=True, help='enables cuda')
 parser.add_argument('--batch_size', type=int, default=1, help='batch size')
-parser.add_argument('--fineSize', type=int, default=512, help='resize image to fineSize x fineSize,leave it to 0 if not resize')
-parser.add_argument('--outf', default='samples/', help='folder to output images')
-parser.add_argument('--alpha', type=float,default=1, help='hyperparameter to blend wct feature and content feature')
+parser.add_argument('--fineSize', type=int, default=1200, help='resize image to fineSize x fineSize,leave it to 0 if not resize')
+parser.add_argument('--outf', default='samples/photo2BnS', help='folder to output images')
+parser.add_argument('--alpha', type=float,default=0.5, help='hyperparameter to blend wct feature and content feature')
 parser.add_argument('--gpu', type=int, default=0, help="which gpu to run on.  default is 0")
+parser.add_argument('--mode', type=str, default='RGB', help='RGB or LAB')
 
 args = parser.parse_args()
 
@@ -40,10 +41,12 @@ except OSError:
     pass
 
 # Data loading code
-dataset = Dataset(args.contentPath,args.stylePath,args.fineSize)
+dataset = Dataset(args.contentPath,args.stylePath,args.fineSize,args.mode)
 loader = torch.utils.data.DataLoader(dataset=dataset,
                                      batch_size=1,
                                      shuffle=False)
+
+
 
 wct = WCT(args)
 def styleTransfer(contentImg,styleImg,imname,csF):
@@ -82,9 +85,8 @@ def styleTransfer(contentImg,styleImg,imname,csF):
     cF1 = cF1.data.cpu().squeeze(0)
     csF1 = wct.transform(cF1,sF1,csF,args.alpha)
     Im1 = wct.d1(csF1)
-    # save_image has this wired design to pad images with 4 pixels at default.
-    vutils.save_image(Im1.data.cpu().float(),os.path.join(args.outf,imname))
-    return
+
+    return Im1
 
 avgTime = 0
 cImg = torch.Tensor()
@@ -100,13 +102,42 @@ for i,(contentImg,styleImg,imname) in enumerate(loader):
     imname = imname[0]
     print('Transferring ' + imname)
     if (args.cuda):
+        if args.mode == 'LAB':
+            color_contentImg = contentImg[:, 1:, :, :]
+            lum_contentImg = contentImg[:, 0, :, :]
+            lum_styleImg = styleImg[:, 0, :, :]
+            contentImg = lum_contentImg.unsqueeze(0).expand(-1, 3, -1, -1)
+            styleImg = lum_styleImg.unsqueeze(0).expand(-1, 3, -1, -1)
+
         contentImg = contentImg.cuda(args.gpu)
         styleImg = styleImg.cuda(args.gpu)
     cImg = Variable(contentImg,volatile=True)
     sImg = Variable(styleImg,volatile=True)
     start_time = time.time()
     # WCT Style Transfer
-    styleTransfer(cImg,sImg,imname,csF)
+    stylizedImg = styleTransfer(cImg,sImg,imname,csF)
+    # save_image has this wired design to pad images with 4 pixels at default.
+    # vutils.save_image(Im1.data.cpu().float(),os.path.join(args.outf,imname), nrow=1, padding=0)
+    if args.mode == 'LAB':
+        lum_stylizedImg = torch.mean(stylizedImg.data.cpu(), 1)
+        mu_contentImg = torch.mean(lum_contentImg)
+        mu_stylizedImg = torch.mean(lum_stylizedImg)
+
+        new_lum_stylizedImg = stylizedImg.data.cpu()
+        new_lum_stylizedImg[:, 0, :, :] = lum_stylizedImg
+        new_lum_stylizedImg[:, 1, :, :] = lum_stylizedImg
+        new_lum_stylizedImg[:, 2, :, :] = lum_stylizedImg
+        lum_outImg = Variable(new_lum_stylizedImg.cuda(args.gpu), volatile=True)
+        save_rgb_image(lum_outImg.squeeze().data.cpu().float(), os.path.join(args.outf, 'lum_stylized_' + imname))
+
+        new_stylizedImg = stylizedImg.data.cpu()
+        new_stylizedImg[:, 0, :, :] = lum_stylizedImg
+        new_stylizedImg[:, 1:, :, :] = color_contentImg
+        outImg = Variable(new_stylizedImg.cuda(args.gpu), volatile=True)
+        save_lab_image(outImg.squeeze().data.cpu().float(), os.path.join(args.outf, 'lab_stylized_' + imname))
+    else:
+        save_rgb_image(stylizedImg.squeeze().data.cpu().float(), os.path.join(args.outf, 'rgb_stylized_' + imname))
+
     end_time = time.time()
     print('Elapsed time is: %f' % (end_time - start_time))
     avgTime += (end_time - start_time)
